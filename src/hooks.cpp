@@ -597,7 +597,7 @@ namespace Hooks
 							void** exp = ExportsPageDbg;
 							while (b < fSize && *exp)
 							{
-								size_t SectionVirtualSize = 0;
+								SIZE_T SectionVirtualSize = 0;
 								void* OutSBaseAddress = nullptr;
 								if (IsAddressSection((ULONG_PTR)*exp, (ULONG_PTR)Hooks_Informastion::hNtDll, IMAGE_FIRST_SECTION(pNtHeader), pNtHeader, &OutSBaseAddress, &SectionVirtualSize))
 								{
