@@ -15,195 +15,206 @@ static CONTEXT FakeContext[0x90000] = { 0 };
 static CONTEXT BeckupHardwareBP[0x90000] = { 0 };
 static bool KIUEDFlag[0x90000] = { 0 };
 
+// Org pointers
+__NtQueryInformationProcess__ ___NtQueryInformationProcess__;
+__NtSetInformationThread__ ___NtSetInformationThread__;
+__NtQuerySystemInformation__ ___NtQuerySystemInformation__;
+__NtClose__ ___NtClose__;
+__NtQueryObject__ ___NtQueryObject__;
+__NtGetContextThread__ ___NtGetContextThread__;
+__NtSetContextThread__ ___NtSetContextThread__;
+__NtContinue__ ___NtContinue__;
+__NtCreateThreadEx__ ___NtCreateThreadEx__;
+__NtSetInformationProcess__ ___NtSetInformationProcess__;
+__NtYieldExecution__ ___NtYieldExecution__;
+__NtSetDebugFilterState__ ___NtSetDebugFilterState__;
+__KiUserExceptionDispatcher__ ___KiUserExceptionDispatcher__;
+__Process32First__ ___Process32First__;
+__Process32Next__ ___Process32Next__;
+
 namespace Hook_emu
 {
+	static bool Cleaned = false;
 	void InitHookFunctionsVars()
 	{
-		for (size_t i = 0; i < 0x90000; i++)
+		if (!Cleaned)
 		{
-			std::memset(&FakeContext[i], 0, sizeof(CONTEXT));
-			std::memset(&BeckupHardwareBP[i], 0, sizeof(CONTEXT));
+			for (size_t i = 0; i < 0x90000; i++)
+			{
+				std::memset(&FakeContext[i], 0, sizeof(CONTEXT));
+				std::memset(&BeckupHardwareBP[i], 0, sizeof(CONTEXT));
+			}
+			Cleaned = true;
 		}
+
+		___NtQueryInformationProcess__ = (__NtQueryInformationProcess__)Hooks_Informastion::Nt_QueryProcessP;
+		___NtSetInformationThread__ = (__NtSetInformationThread__)Hooks_Informastion::Nt_SetThreadInformationP;
+		___NtQuerySystemInformation__ = (__NtQuerySystemInformation__)Hooks_Informastion::Nt_QuerySystemP;
+		___NtClose__ = (__NtClose__)Hooks_Informastion::Nt_CloseP;
+		___NtQueryObject__ = (__NtQueryObject__)Hooks_Informastion::Nt_QueryObjectP;
+		___NtGetContextThread__ = (__NtGetContextThread__)Hooks_Informastion::Nt_NtGetContextThreadP;
+		___NtSetContextThread__ = (__NtSetContextThread__)Hooks_Informastion::Nt_NtSetContextThreadP;
+		___NtContinue__ = (__NtContinue__)Hooks_Informastion::Nt_ContinueP;
+		___NtCreateThreadEx__ = (__NtCreateThreadEx__)Hooks_Informastion::Nt_CreateThreadExP;
+		___NtSetInformationProcess__ = (__NtSetInformationProcess__)Hooks_Informastion::Nt_SetInformationProcessP;
+		___NtYieldExecution__ = (__NtYieldExecution__)nullptr;
+		___NtSetDebugFilterState__ = (__NtSetDebugFilterState__)nullptr;
+		___KiUserExceptionDispatcher__ = (__KiUserExceptionDispatcher__)nullptr;
+		___Process32First__ = (__Process32First__)Hooks_Informastion::Kernel32_Process32FirstWP;
+		___Process32Next__ = (__Process32Next__)Hooks_Informastion::Kernel32_Process32NextWP;
 	}
-	extern "C"
+	
+	// proxied functions 
+	NTSTATUS NTAPI __NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass, PVOID ProcessInformation, ULONG  ProcessInformationLength, PULONG ReturnLength)
 	{
+		NTSTATUS Return = STATUS_SUCCESS;
 
-		_declspec(dllexport) NTSTATUS NTAPI __NtQueryInformationProcess(IN HANDLE ProcessHandle, IN PROCESSINFOCLASS ProcessInformationClass,
-			OUT PVOID ProcessInformation,
-			IN ULONG  ProcessInformationLength,
-			OUT PULONG ReturnLength)
+		// Call the restored function 
+		Return = ___NtQueryInformationProcess__(ProcessHandle, ProcessInformationClass, ProcessInformation, ProcessInformationLength, ReturnLength);
+
+		if (NT_SUCCESS(Return))
 		{
-			NTSTATUS Return = STATUS_SUCCESS;
-
-			// Call the restored function 
-			__NtQueryInformationProcess__ Call = (__NtQueryInformationProcess__)Hooks_Informastion::Nt_QueryProcessP;
-			Return = Call(ProcessHandle, ProcessInformationClass, ProcessInformation, ProcessInformationLength, ReturnLength);
-
-			if (NT_SUCCESS(Return) && ProcessInformation > NULL)
+			if (ProcessInformationClass == 0x07) // Debug port
 			{
-				if (ProcessInformationClass == 0x07) // Debug port
-				{
-					// Check if is the correct size
-					if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
-						*(DWORD_PTR*)ProcessInformation = 0;
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
+				// Check if is the correct size
+				if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
+					*(DWORD_PTR*)ProcessInformation = 0;
 				}
-				if (ProcessInformationClass == 0x1E) //  Debug object
-				{
-					// Check if is the correct size
-					if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
-						*(DWORD_PTR*)ProcessInformation = 0;
-						return 0xC0000353; // STATUS_PORT_NOT_SET
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
-				}
-				if (ProcessInformationClass == 0x1F) // Debug flags
-				{
-					// Check if is the correct size
-					if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
-						*(DWORD_PTR*)ProcessInformation = DebugFlags;
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
-				}
-				if (ProcessInformationClass == 0x00) // Basic information
-				{
-					// Patch Parent PID
-					_CCPROCESS_BASIC_INFORMATION* pb = (_CCPROCESS_BASIC_INFORMATION*)ProcessInformation;
-					pb->InheritedFromUniqueProcessId = (HANDLE)Hooks_Informastion::FPPID;
-				}
-				if (ProcessInformationClass == 29) // ProcessBreakOnTermination
-				{
-					// Check if is the correct size
-					if (ProcessInformationLength >= sizeof(ULONG)) {
-						*(ULONG*)ProcessInformation = BreakT;
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
-				}
-				if (ProcessInformationClass == 32)
-				{
-					if (IsEnabledTracing)
-						return STATUS_SUCCESS;
-					else
-						return STATUS_INVALID_PARAMETER;
-				}
+				else
+					return STATUS_INVALID_PARAMETER;
 			}
-			return Return;
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetInformationThread(
-			IN HANDLE          ThreadHandle,
-			IN THREADINFOCLASS ThreadInformationClass,
-			IN PVOID           ThreadInformation,
-			IN ULONG           ThreadInformationLength
-		)
-		{
-			// Ignore the call with ThreadHideFromDebugger flag
-			if (ThreadInformationClass == 0x11 && ThreadInformation <= NULL && ThreadInformationLength <= NULL)
+			else if (ProcessInformationClass == 0x1E) //  Debug object
 			{
-				return STATUS_SUCCESS;
+				// Check if is the correct size
+				if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
+					*(DWORD_PTR*)ProcessInformation = 0;
+					return STATUS_PORT_NOT_SET;
+				}
+				else
+					return STATUS_INVALID_PARAMETER;
 			}
-			__NtSetInformationThread__ Call = (__NtSetInformationThread__)Hooks_Informastion::Nt_SetThreadInformationP;
-			return Call(ThreadHandle, ThreadInformationClass, ThreadInformation, ThreadInformationLength);
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtQuerySystemInformation(
-			IN SYSTEM_INFORMATION_CLASS SystemInformationClass,
-			OUT PVOID                   SystemInformation,
-			IN ULONG                    SystemInformationLength,
-			OUT PULONG                  ReturnLength
-		)
-		{
-			NTSTATUS Return = STATUS_SUCCESS;
-
-			__NtQuerySystemInformation__ Call = (__NtQuerySystemInformation__)Hooks_Informastion::Nt_QuerySystemP;
-			Return = Call(SystemInformationClass, SystemInformation, SystemInformationLength, ReturnLength);
-
-			if (NT_SUCCESS(Return) && SystemInformation > NULL)
+			else if (ProcessInformationClass == 0x1F) // Debug flags
 			{
-				// Check if is requesting SystemKernelDebuggerInformation(0x23) flag
-				if (SystemInformationClass == 0x23)
-				{
-					if (SystemInformationLength >= sizeof(_SYSTEM_KERNEL_DEBUGGER_INFORMATION)) {
-						_SYSTEM_KERNEL_DEBUGGER_INFORMATION* skdi = (_SYSTEM_KERNEL_DEBUGGER_INFORMATION*)SystemInformation;
-						skdi->DebuggerEnabled = false;
-						skdi->DebuggerNotPresent = true;
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
+				// Check if is the correct size
+				if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
+					*(DWORD_PTR*)ProcessInformation = DebugFlags;
 				}
+				else
+					return STATUS_INVALID_PARAMETER;
 			}
-			return Return;
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtClose(
-			IN HANDLE Handle
-		)
-		{
-			BYTE BUFF[2] = { 0 };
-			NTSTATUS Return = STATUS_SUCCESS;
-
-			__NtClose__ CallClose = (__NtClose__)Hooks_Informastion::Nt_CloseP;
-			__NtQueryObject__ CallQuery = (__NtQueryObject__)Hooks_Informastion::Nt_QueryObjectP;
-
-			// Check if the handle is valid
-			if ((Return = CallQuery(Handle, (OBJECT_INFORMATION_CLASS)0x4, BUFF, 0x2, NULL)) != STATUS_INVALID_HANDLE) {
-				return CallClose(Handle);
-			}
-			return Return;
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtQueryObject(
-			IN HANDLE                   Handle,
-			IN OBJECT_INFORMATION_CLASS ObjectInformationClass,
-			OUT PVOID                    ObjectInformation,
-			IN ULONG                    ObjectInformationLength,
-			OUT PULONG                   ReturnLength
-		)
-		{
-
-			NTSTATUS Return = STATUS_SUCCESS;
-			__NtQueryObject__ Call = (__NtQueryObject__)Hooks_Informastion::Nt_QueryObjectP;
-			Return = Call(Handle, ObjectInformationClass, ObjectInformation, ObjectInformationLength, ReturnLength);
-
-			if (NT_SUCCESS(Return) && ObjectInformation > NULL)
+			else if (ProcessInformationClass == 0x00) // Basic information
 			{
-				if (ObjectInformationClass == 0x2)
-				{
-					// Check if is the correct size
-					if (ObjectInformationLength >= sizeof(OBJECT_TYPE_INFORMATION)) {
-						POBJECT_TYPE_INFORMATION object = (POBJECT_TYPE_INFORMATION)ObjectInformation;
-						object->TotalNumberOfObjects = TRUE;
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
-				}
-				if (ObjectInformationClass == 0x3)
-				{
-					// Check if is the correct size
-					if (ObjectInformationLength >= sizeof(OBJECT_TYPE_INFORMATION)) {
-						POBJECT_TYPE_INFORMATION object = (POBJECT_TYPE_INFORMATION)ObjectInformation;
-						object->TotalNumberOfObjects = TRUE;
-					}
-					else
-						return STATUS_INVALID_PARAMETER;
-				}
+				// Patch Parent PID
+				_CCPROCESS_BASIC_INFORMATION* pb = (_CCPROCESS_BASIC_INFORMATION*)ProcessInformation;
+				pb->InheritedFromUniqueProcessId = (HANDLE)Hooks_Informastion::FPPID;
 			}
-			return Return;
+			else if (ProcessInformationClass == 29) // ProcessBreakOnTermination
+			{
+				// Check if is the correct size
+				if (ProcessInformationLength >= sizeof(ULONG)) {
+					*(ULONG*)ProcessInformation = BreakT;
+				}
+				else
+					return STATUS_INVALID_PARAMETER;
+			}
+			else if (ProcessInformationClass == 32)
+			{
+				if (IsEnabledTracing)
+					return STATUS_SUCCESS;
+				else
+					return STATUS_INVALID_PARAMETER;
+			}
 		}
-
-		// DRx functions
-		_declspec(dllexport) NTSTATUS NTAPI __NtGetContextThread(
-			IN HANDLE               ThreadHandle,
-			OUT PCONTEXT            pContext
-		)
+		return Return;
+	}
+	NTSTATUS NTAPI __NtSetInformationThread(HANDLE ThreadHandle, THREADINFOCLASS ThreadInformationClass, PVOID ThreadInformation, ULONG ThreadInformationLength)
+	{
+		// Ignore the call with ThreadHideFromDebugger flag
+		if (ThreadInformationClass == 0x11 && ThreadInformation <= NULL && ThreadInformationLength <= NULL)
 		{
-			NTSTATUS Return = STATUS_SUCCESS;
-			__NtGetContextThread__ Call = (__NtGetContextThread__)Hooks_Informastion::Nt_NtGetContextThreadP;
+			return STATUS_SUCCESS;
+		}
+		return ___NtSetInformationThread__(ThreadHandle, ThreadInformationClass, ThreadInformation, ThreadInformationLength);
+	}
+	NTSTATUS NTAPI __NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength)
+	{
+		NTSTATUS Return = STATUS_SUCCESS;
 
-			if (pContext > NULL) {
-				if (pContext->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
-					size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetThreadId(ThreadHandle));
+		Return = ___NtQuerySystemInformation__(SystemInformationClass, SystemInformation, SystemInformationLength, ReturnLength);
+
+		if (NT_SUCCESS(Return))
+		{
+			// Check if is requesting SystemKernelDebuggerInformation(0x23) flag
+			if (SystemInformationClass == 0x23)
+			{
+				if (SystemInformationLength >= sizeof(_SYSTEM_KERNEL_DEBUGGER_INFORMATION)) {
+					_SYSTEM_KERNEL_DEBUGGER_INFORMATION* skdi = (_SYSTEM_KERNEL_DEBUGGER_INFORMATION*)SystemInformation;
+					skdi->DebuggerEnabled = false;
+					skdi->DebuggerNotPresent = true;
+				}
+				else
+					return STATUS_INVALID_PARAMETER;
+			}
+		}
+		return Return;
+	}
+	NTSTATUS NTAPI __NtClose(HANDLE Handle)
+	{
+		BYTE BUFF[2] = { 0 };
+		NTSTATUS Return = STATUS_SUCCESS;
+
+		// Check if the handle is valid
+		if ((Return = ___NtQueryObject__(Handle, (OBJECT_INFORMATION_CLASS)0x4, BUFF, 0x2, NULL)) != STATUS_INVALID_HANDLE) {
+			return ___NtClose__(Handle);
+		}
+		return Return;
+	}
+	NTSTATUS NTAPI __NtQueryObject(HANDLE Handle, OBJECT_INFORMATION_CLASS ObjectInformationClass, PVOID ObjectInformation, ULONG ObjectInformationLength, PULONG ReturnLength)
+	{
+		NTSTATUS Return = STATUS_SUCCESS;
+		Return = ___NtQueryObject__(Handle, ObjectInformationClass, ObjectInformation, ObjectInformationLength, ReturnLength);
+
+		if (NT_SUCCESS(Return))
+		{
+			if (ObjectInformationClass == 0x2)
+			{
+				// Check if is the correct size
+				if (ObjectInformationLength >= sizeof(OBJECT_TYPE_INFORMATION)) {
+					POBJECT_TYPE_INFORMATION object = (POBJECT_TYPE_INFORMATION)ObjectInformation;
+					object->TotalNumberOfObjects = TRUE;
+				}
+				else
+					return STATUS_INVALID_PARAMETER;
+			}
+			if (ObjectInformationClass == 0x3)
+			{
+				// Check if is the correct size
+				if (ObjectInformationLength >= sizeof(OBJECT_TYPE_INFORMATION)) {
+					POBJECT_TYPE_INFORMATION object = (POBJECT_TYPE_INFORMATION)ObjectInformation;
+					object->TotalNumberOfObjects = TRUE;
+				}
+				else
+					return STATUS_INVALID_PARAMETER;
+			}
+		}
+		return Return;
+	}
+
+	// DRx functions
+	NTSTATUS NTAPI __NtGetContextThread(HANDLE ThreadHandle, PCONTEXT pContext)
+	{
+		NTSTATUS Return = STATUS_SUCCESS;
+
+		if (pContext) {
+			if (pContext->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
+				size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetThreadId(ThreadHandle));
+
+				// Clean the flag
+				DWORD Flags = pContext->ContextFlags;
+				pContext->ContextFlags &= ~CONTEXT_DEBUG_REGISTERS;
+
+				if (pContext->ContextFlags) {
+					Return = ___NtGetContextThread__(ThreadHandle, pContext);
 
 					// Now each Thread handle should have its own CONTEXT.
 					pContext->Dr0 = FakeContext[CurrOffset].Dr0;
@@ -213,228 +224,190 @@ namespace Hook_emu
 					pContext->Dr6 = FakeContext[CurrOffset].Dr6;
 					pContext->Dr7 = FakeContext[CurrOffset].Dr7;
 
-					// Clean the flag
-					DWORD Flags = pContext->ContextFlags;
-					pContext->ContextFlags &= ~CONTEXT_DEBUG_REGISTERS;
-
-					// If the flag different means there's other requested.
-					if (Flags != pContext->ContextFlags) {
-						if (Flags) {
-							Return = Call(ThreadHandle, pContext);
-
-							// Once we got context infos without the CONTEXT_DEBUG_REGISTERS, we can restore the original flags to be safe.
-							pContext->ContextFlags = Flags;
-							return Return;
-						}
-					}
-					return STATUS_SUCCESS;
+					// Once we got context infos without the CONTEXT_DEBUG_REGISTERS, we can restore the original flags to be safe.
+					pContext->ContextFlags = Flags;
+					return Return;
 				}
+
+				// Now each Thread handle should have its own CONTEXT.
+				pContext->Dr0 = FakeContext[CurrOffset].Dr0;
+				pContext->Dr1 = FakeContext[CurrOffset].Dr1;
+				pContext->Dr2 = FakeContext[CurrOffset].Dr2;
+				pContext->Dr3 = FakeContext[CurrOffset].Dr3;
+				pContext->Dr6 = FakeContext[CurrOffset].Dr6;
+				pContext->Dr7 = FakeContext[CurrOffset].Dr7;
+
+				// Once we got context infos without the CONTEXT_DEBUG_REGISTERS, we can restore the original flags to be safe.
+				pContext->ContextFlags = Flags;
+				return STATUS_SUCCESS;
 			}
-			return Call(ThreadHandle, pContext);
 		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetContextThread(
-			IN HANDLE               ThreadHandle,
-			IN PCONTEXT            pContext
-		)
-		{
-			NTSTATUS Return = STATUS_SUCCESS;
-			__NtSetContextThread__ Call = (__NtSetContextThread__)Hooks_Informastion::Nt_NtSetContextThreadP;
+		return ___NtGetContextThread__(ThreadHandle, pContext);
+	}
+	NTSTATUS NTAPI __NtSetContextThread(HANDLE ThreadHandle, PCONTEXT pContext)
+	{
+		NTSTATUS Return = STATUS_SUCCESS;
 
-			if (pContext > NULL) {
-				if (pContext->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
-					if (Hooks_Config::FakeContextEmulation) {
-						size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetThreadId(ThreadHandle));
+		if (pContext) {
+			if (pContext->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
+				if (Hooks_Config::FakeContextEmulation) {
+					size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetThreadId(ThreadHandle));
 
-						// Now each Thread handle should have its own CONTEXT.
-						FakeContext[CurrOffset].Dr0 = pContext->Dr0;
-						FakeContext[CurrOffset].Dr1 = pContext->Dr1;
-						FakeContext[CurrOffset].Dr2 = pContext->Dr2;
-						FakeContext[CurrOffset].Dr3 = pContext->Dr3;
-						FakeContext[CurrOffset].Dr6 = pContext->Dr6;
-						FakeContext[CurrOffset].Dr7 = pContext->Dr7;
-					}
-
-					// Clean the flag
-					DWORD Flags = pContext->ContextFlags;
-					pContext->ContextFlags &= ~CONTEXT_DEBUG_REGISTERS;
-
-					// If the flag different means there's other requested.
-					if (Flags != pContext->ContextFlags) {
-						if (Flags) {
-							Return = Call(ThreadHandle, pContext);
-
-							// Once we got context infos without the CONTEXT_DEBUG_REGISTERS, we can restore the original flags to be safe.
-							pContext->ContextFlags = Flags;
-							return Return;
-						}
-					}
-					return STATUS_SUCCESS;
+					// Now each Thread handle should have its own CONTEXT.
+					FakeContext[CurrOffset].Dr0 = pContext->Dr0;
+					FakeContext[CurrOffset].Dr1 = pContext->Dr1;
+					FakeContext[CurrOffset].Dr2 = pContext->Dr2;
+					FakeContext[CurrOffset].Dr3 = pContext->Dr3;
+					FakeContext[CurrOffset].Dr6 = pContext->Dr6;
+					FakeContext[CurrOffset].Dr7 = pContext->Dr7;
 				}
+
+				// Clean the flag
+				DWORD Flags = pContext->ContextFlags;
+				pContext->ContextFlags &= ~CONTEXT_DEBUG_REGISTERS;
+
+				if (pContext->ContextFlags) {
+					Return = ___NtSetContextThread__(ThreadHandle, pContext);
+
+					// Once we got context infos without the CONTEXT_DEBUG_REGISTERS, we can restore the original flags to be safe.
+					pContext->ContextFlags = Flags;
+					return Return;
+				}
+				pContext->ContextFlags = Flags;
+				return STATUS_SUCCESS;
 			}
-			return Call(ThreadHandle, pContext);
 		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtContinue(
-			IN PCONTEXT ThreadContext,
-			IN BOOLEAN RaiseAlert
-		)
+		return ___NtSetContextThread__(ThreadHandle, pContext);
+	}
+
+	NTSTATUS NTAPI __NtContinue(PCONTEXT ThreadContext, BOOLEAN RaiseAlert)
+	{
+		if (ThreadContext) {
+			size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetCurrentThreadId());
+
+			// Now each Thread handle should have its own CONTEXT.
+			if (KIUEDFlag[CurrOffset]) {
+				ThreadContext->Dr0 = BeckupHardwareBP[CurrOffset].Dr0;
+				ThreadContext->Dr1 = BeckupHardwareBP[CurrOffset].Dr1;
+				ThreadContext->Dr2 = BeckupHardwareBP[CurrOffset].Dr2;
+				ThreadContext->Dr3 = BeckupHardwareBP[CurrOffset].Dr3;
+				ThreadContext->Dr6 = BeckupHardwareBP[CurrOffset].Dr6;
+				ThreadContext->Dr7 = BeckupHardwareBP[CurrOffset].Dr7;
+
+				KIUEDFlag[CurrOffset] = false;
+			}
+		}
+		return ___NtContinue__(ThreadContext, RaiseAlert);
+	}
+	NTSTATUS NTAPI __NtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, ULONG_PTR ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PPS_ATTRIBUTE_LIST AttributeList)
+	{
+		ULONG Flags = CreateFlags;
+		if (Flags & THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER) {
+			Flags &= ~THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER;
+		}
+		return ___NtCreateThreadEx__(ThreadHandle, DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, Flags, ZeroBits, StackSize, MaximumStackSize, AttributeList);
+	}
+	NTSTATUS NTAPI __NtSetInformationProcess(HANDLE ProcessHandle, PROCESS_INFORMATION_CLASS ProcessInformationClass, PVOID ProcessInformation, ULONG ProcessInformationLength)
+	{
+		if (ProcessInformationClass == 32)
 		{
-			__NtContinue__ Call = (__NtContinue__)Hooks_Informastion::Nt_ContinueP;
-			if (ThreadContext > NULL) {
+			IsEnabledTracing = true;
+			return STATUS_SUCCESS;
+		}
+		else if (ProcessInformationClass == 0x1F) // Debug flags
+		{
+			// Check if is the correct size
+			if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
+				DebugFlags = *(DWORD_PTR*)ProcessInformation;
+			}
+			else
+				return STATUS_INVALID_PARAMETER;
+		}
+		return ___NtSetInformationProcess__(ProcessHandle, ProcessInformationClass, ProcessInformation, ProcessInformationLength);
+	}
+	NTSTATUS NTAPI __NtYieldExecution()
+	{
+		return STATUS_NO_YIELD_PERFORMED;
+	}
+	NTSTATUS NTAPI __NtSetDebugFilterState(ULONG ComponentId, ULONG Level, BOOLEAN State)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+
+	VOID NTAPI __KiUserExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context)
+	{
+		if (Context) {
+			if (Context->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
 				size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetCurrentThreadId());
 
 				// Now each Thread handle should have its own CONTEXT.
-				if (KIUEDFlag[CurrOffset]) {
-					ThreadContext->Dr0 = BeckupHardwareBP[CurrOffset].Dr0;
-					ThreadContext->Dr1 = BeckupHardwareBP[CurrOffset].Dr1;
-					ThreadContext->Dr2 = BeckupHardwareBP[CurrOffset].Dr2;
-					ThreadContext->Dr3 = BeckupHardwareBP[CurrOffset].Dr3;
-					ThreadContext->Dr6 = BeckupHardwareBP[CurrOffset].Dr6;
-					ThreadContext->Dr7 = BeckupHardwareBP[CurrOffset].Dr7;
+				BeckupHardwareBP[CurrOffset].Dr0 = Context->Dr0;
+				BeckupHardwareBP[CurrOffset].Dr1 = Context->Dr1;
+				BeckupHardwareBP[CurrOffset].Dr2 = Context->Dr2;
+				BeckupHardwareBP[CurrOffset].Dr3 = Context->Dr3;
+				BeckupHardwareBP[CurrOffset].Dr6 = Context->Dr6;
+				BeckupHardwareBP[CurrOffset].Dr7 = Context->Dr7;
 
-					KIUEDFlag[CurrOffset] = false;
-				}
-			}
-			return Call(ThreadContext, RaiseAlert);
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtCreateThreadEx(
-			_Out_ PHANDLE ThreadHandle,
-			_In_ ACCESS_MASK DesiredAccess,
-			_In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
-			_In_ HANDLE ProcessHandle,
-			_In_ PVOID StartRoutine,
-			_In_opt_ PVOID Argument,
-			_In_ ULONG CreateFlags,
-			_In_opt_ ULONG_PTR ZeroBits,
-			_In_opt_ SIZE_T StackSize,
-			_In_opt_ SIZE_T MaximumStackSize,
-			_In_opt_ PPS_ATTRIBUTE_LIST AttributeList
-		)
-		{
-			__NtCreateThreadEx__ Call = (__NtCreateThreadEx__)Hooks_Informastion::Nt_CreateThreadExP;
-			ULONG Flags = CreateFlags;
+				Context->Dr0 = FakeContext[CurrOffset].Dr0;
+				Context->Dr1 = FakeContext[CurrOffset].Dr1;
+				Context->Dr2 = FakeContext[CurrOffset].Dr2;
+				Context->Dr3 = FakeContext[CurrOffset].Dr3;
+				Context->Dr6 = FakeContext[CurrOffset].Dr6;
+				Context->Dr7 = FakeContext[CurrOffset].Dr7;
 
-			if (Flags & THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER) {
-				Flags &= ~THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER;
-			}
-			return Call(ThreadHandle, DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, Flags, ZeroBits, StackSize, MaximumStackSize, AttributeList);
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetInformationProcess(
-			IN HANDLE ProcessHandle,
-			IN PROCESS_INFORMATION_CLASS ProcessInformationClass,
-			IN PVOID ProcessInformation,
-			IN ULONG ProcessInformationLength
-		)
-		{
-			__NtSetInformationProcess__ Call = (__NtSetInformationProcess__)Hooks_Informastion::Nt_SetInformationProcessP;
-
-			if (ProcessInformationClass == 32)
-			{
-				IsEnabledTracing = true;
-				return NULL;
-			}
-			if (ProcessInformationClass == 0x1F) // Debug flags
-			{
-				// Check if is the correct size
-				if (ProcessInformationLength >= sizeof(DWORD_PTR)) {
-					DebugFlags = *(DWORD_PTR*)ProcessInformation;
-				}
-				else
-					return STATUS_INVALID_PARAMETER;
-			}
-			return Call(ProcessHandle, ProcessInformationClass, ProcessInformation, ProcessInformationLength);
-		}
-		_declspec(dllexport) VOID NTAPI __KiUserExceptionDispatcher(
-			IN PEXCEPTION_RECORD ExceptionRecord,
-			IN PCONTEXT Context
-		)
-		{
-			if (Context > NULL) {
-				if (Context->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
-					size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetCurrentThreadId());
-
-					// Now each Thread handle should have its own CONTEXT.
-					BeckupHardwareBP[CurrOffset].Dr0 = Context->Dr0;
-					BeckupHardwareBP[CurrOffset].Dr1 = Context->Dr1;
-					BeckupHardwareBP[CurrOffset].Dr2 = Context->Dr2;
-					BeckupHardwareBP[CurrOffset].Dr3 = Context->Dr3;
-					BeckupHardwareBP[CurrOffset].Dr6 = Context->Dr6;
-					BeckupHardwareBP[CurrOffset].Dr7 = Context->Dr7;
-
-					Context->Dr0 = FakeContext[CurrOffset].Dr0;
-					Context->Dr1 = FakeContext[CurrOffset].Dr1;
-					Context->Dr2 = FakeContext[CurrOffset].Dr2;
-					Context->Dr3 = FakeContext[CurrOffset].Dr3;
-					Context->Dr6 = FakeContext[CurrOffset].Dr6;
-					Context->Dr7 = FakeContext[CurrOffset].Dr7;
-
-					KIUEDFlag[CurrOffset] = true;
-				}
+				KIUEDFlag[CurrOffset] = true;
 			}
 		}
-		NAKED VOID NTAPI __RKiUserExceptionDispatcher(
-			IN PEXCEPTION_RECORD ExceptionRecord,
-			IN PCONTEXT Context
-		)
-		{
-			// We'll write bytes manually for x64.
+	}
+	NAKED VOID NTAPI __RKiUserExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context)
+	{
+		// We'll write bytes manually for x64.
 #ifndef _WIN64
-			_asm
-			{
-				push dword ptr[esp + 4]
-				push dword ptr[esp + 4]
-				call __KiUserExceptionDispatcher
-				jmp Hooks_Informastion::Nt_ExceptionDispatcherP
-			}
+		_asm
+		{
+			push dword ptr[esp + 4]
+			push dword ptr[esp + 4]
+			call __KiUserExceptionDispatcher
+			jmp Hooks_Informastion::Nt_ExceptionDispatcherP
+		}
 #endif
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtYieldExecution()
-		{
-			return 0x40000024; // STATUS_NO_YIELD_PERFORMED
-		}
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetDebugFilterState(
-			IN ULONG ComponentId,
-			IN ULONG Level,
-			IN BOOLEAN State
-		)
-		{
-			return 0xC0000022; // STATUS_ACCESS_DENIED
-		}
+	}
 
-		_declspec(dllexport) BOOL WINAPI __Process32FirstW(
-			HANDLE hSnapshot,
-			LPPROCESSENTRY32 lppe
-		)
-		{
-			BOOL Return = NULL;
-			__Process32First__ Call = (__Process32First__)Hooks_Informastion::Kernel32_Process32FirstWP;
-			Return = Call(hSnapshot, lppe);
 
-			// Here we patch again the parent PID
-			if (Return)
-			{
-				if (lppe->th32ProcessID == Hooks_Informastion::CurrentProcessID) {
-					lppe->th32ParentProcessID = Hooks_Informastion::FPPID;
-				}
+	BOOL WINAPI __Process32FirstW(HANDLE hSnapshot, LPPROCESSENTRY32 lppe)
+	{
+		BOOL Return;
+		Return = ___Process32First__(hSnapshot, lppe);
+
+		// Here we patch again the parent PID
+		if (Return)
+		{
+			if (lppe->th32ProcessID == Hooks_Informastion::CurrentProcessID) {
+				lppe->th32ParentProcessID = Hooks_Informastion::FPPID;
 			}
-			return Return;
 		}
-		_declspec(dllexport) BOOL WINAPI __Process32NextW(
-			HANDLE hSnapshot,
-			LPPROCESSENTRY32 lppe
-		)
-		{
-			BOOL Return = NULL;
-			__Process32Next__ Call = (__Process32Next__)Hooks_Informastion::Kernel32_Process32NextWP;
-			Return = Call(hSnapshot, lppe);
+		return Return;
+	}
+	BOOL WINAPI __Process32NextW(HANDLE hSnapshot, LPPROCESSENTRY32 lppe)
+	{
+		BOOL Return;
+		Return = ___Process32Next__(hSnapshot, lppe);
 
-			// Here we patch again the parent PID
-			if (Return)
-			{
-				if (lppe->th32ProcessID == Hooks_Informastion::CurrentProcessID) {
-					lppe->th32ParentProcessID = Hooks_Informastion::FPPID;
-				}
+		// Here we patch again the parent PID
+		if (Return)
+		{
+			if (lppe->th32ProcessID == Hooks_Informastion::CurrentProcessID) {
+				lppe->th32ParentProcessID = Hooks_Informastion::FPPID;
 			}
-			return Return;
 		}
+		return Return;
+	}
+	DWORD WINAPI __GetTickCount()
+	{
+		return 1;	// Return static value
+	}
+	ULONGLONG WINAPI __GetTickCount64()
+	{
+		return 1;	// Return static value
 	}
 }

@@ -9,6 +9,12 @@
 #include <versionhelpers.h>
 #include <tlhelp32.h>
 
+#ifdef _WIN64
+#define VALID_MACHINE IMAGE_FILE_MACHINE_AMD64
+#else
+#define VALID_MACHINE IMAGE_FILE_MACHINE_I386
+#endif
+
 namespace Hooks_Informastion
 {
 	HMODULE hNtDll = NULL;
@@ -74,6 +80,12 @@ namespace Hooks_Informastion
 
 	void* Kernel32_Process32NextWP = NULL;
 	int32_t Kernel32_Process32NextWID = NULL;
+
+	void* Kernel32_GetTickCountP = NULL;
+	int32_t Kernel32_GetTickCountID = NULL;
+
+	void* Kernel32_GetTickCount64P = NULL;
+	int32_t Kernel32_GetTickCount64ID = NULL;
 }
 
 namespace Hooks_Config
@@ -111,6 +123,8 @@ namespace Hooks_Config
 	
 	bool Kernel32_Process32First = true;
 	bool Kernel32_Process32Next = true;
+	bool Kernel32_GetTickCount = true;
+	bool Kernel32_GetTickCount64 = true;
 }
 
 namespace Hooks
@@ -144,7 +158,7 @@ namespace Hooks
 					if (IsWindowsVistaOrGreater())
 					{
 						// Check if HEAP_GROWABLE flag is not setted, if not, we set it
-						if (*(DWORD*)((ULONG_PTR)_HeapAddress + HeapFlagsBaseWinHigher) & ~HEAP_GROWABLE) {
+						if (!(*(DWORD*)((ULONG_PTR)_HeapAddress + HeapFlagsBaseWinHigher) & HEAP_GROWABLE)) {
 							*(DWORD*)((ULONG_PTR)_HeapAddress + HeapFlagsBaseWinHigher) |= HEAP_GROWABLE;
 						}
 						*(DWORD*)((ULONG_PTR)_HeapAddress + HeapForceFlagsBaseWinHigher) = 0;
@@ -152,7 +166,7 @@ namespace Hooks
 					else
 					{
 						// Check if HEAP_GROWABLE flag is not setted, if not, we set it
-						if (*(DWORD*)((ULONG_PTR)_HeapAddress + HeapFlagsBaseWinLower) & ~HEAP_GROWABLE) {
+						if (!(*(DWORD*)((ULONG_PTR)_HeapAddress + HeapFlagsBaseWinLower) & HEAP_GROWABLE)) {
 							*(DWORD*)((ULONG_PTR)_HeapAddress + HeapFlagsBaseWinLower) |= HEAP_GROWABLE;
 						}
 						*(DWORD*)((ULONG_PTR)_HeapAddress + HeapForceFlagsBaseWinLower) = 0;
@@ -480,6 +494,18 @@ namespace Hooks
 			}
 		}
 	}
+	static bool RetrieveSystemDirectory(char* OutPut)
+	{
+#ifdef _WIN64
+		GetSystemDirectoryA(OutPut, MAX_PATH);
+#else
+		GetSystemWow64DirectoryA(OutPut, MAX_PATH);
+		if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED) {
+			GetSystemDirectoryA(OutPut, MAX_PATH);
+		}
+#endif
+		return true;
+	}
 	static bool IsAddressSection(ULONG_PTR address, ULONG_PTR Baseaddress, IMAGE_SECTION_HEADER* pSHeader, IMAGE_NT_HEADERS* ntheader, void** OutSBaseAddress,
 		SIZE_T* OutSSize) 
 	{
@@ -524,132 +550,184 @@ namespace Hooks
 			void* Page = NULL;
 			void** ExportsPage = NULL;
 			void** ExportsPageDbg = NULL;
+			void* OriginalMappedNtdll = NULL;
 
 			size_t ExportsFunctions = NULL;
 			size_t fileSize = NULL;
 
-			std::FILE* FileP = NULL;
+			HANDLE FileP = NULL;
 
 			// Check if the variable is empty 
 			if (SystemDirectory[0] == NULL) {
-				GetSystemDirectoryA(SystemDirectory, MAX_PATH);
+				RetrieveSystemDirectory(SystemDirectory);
 				lstrcatA(SystemDirectory, "\\ntdll.dll");
 			}
 
 			// Read the file
-			FileP = std::fopen(SystemDirectory, "rb");
-			if (FileP)
+			FileP = CreateFileA(SystemDirectory, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (FileP != INVALID_HANDLE_VALUE)
 			{
 				// Get file size
-				std::fseek(FileP, 0, SEEK_END);
-				fileSize = std::ftell(FileP);
-				std::fseek(FileP, 0, SEEK_SET);
+				fileSize = GetFileSize(FileP, NULL);
 
-				Page = std::malloc(fileSize);
+				Page = VirtualAlloc(0, fileSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 				if (Page)
 				{
 					// Read the file and parse headers later
-					std::fread(Page, fileSize, 1, FileP);
+					DWORD READ;
+					if (!ReadFile(FileP, Page, fileSize, &READ, NULL)) {
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
 
 					// Headers
 					auto pDosHeader = (IMAGE_DOS_HEADER*)Hooks_Informastion::hNtDll;
 					if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-						std::free(Page);
-						std::fclose(FileP);
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
 						return;
 					}
 					auto pNtHeader = (IMAGE_NT_HEADERS*)((ULONG_PTR)Hooks_Informastion::hNtDll + pDosHeader->e_lfanew);
 					if (pNtHeader->Signature != IMAGE_NT_SIGNATURE) {
-						std::free(Page);
-						std::fclose(FileP);
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
 						return;
 					}
 					if (pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size <= 0) {
-						std::free(Page);
-						std::fclose(FileP);
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
 						return;
+					}
+					if (pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress <= 0) {
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+
+					auto pDosHeaderFile = (IMAGE_DOS_HEADER*)Page;
+					if (pDosHeaderFile->e_magic != IMAGE_DOS_SIGNATURE) {
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+					auto pNtHeaderFile = (IMAGE_NT_HEADERS*)((ULONG_PTR)Page + pDosHeaderFile->e_lfanew);
+					if (pNtHeaderFile->Signature != IMAGE_NT_SIGNATURE) {
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+					if (pNtHeaderFile->FileHeader.Machine != VALID_MACHINE) {
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+					
+					// Map 
+					OriginalMappedNtdll = VirtualAlloc(0, pNtHeaderFile->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+					if (!OriginalMappedNtdll) {
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+					std::memcpy(OriginalMappedNtdll, Page, pNtHeaderFile->OptionalHeader.SizeOfHeaders);
+					auto pSecHeader = IMAGE_FIRST_SECTION(pNtHeaderFile);
+					for (int i = 0; i < pNtHeaderFile->FileHeader.NumberOfSections; i++, pSecHeader++) {
+						if (pSecHeader->SizeOfRawData) {
+							std::memcpy((void*)((ULONG_PTR)OriginalMappedNtdll + pSecHeader->VirtualAddress), (void*)((ULONG_PTR)Page + pSecHeader->PointerToRawData),
+								pSecHeader->SizeOfRawData);
+						}
 					}
 					auto pExports = (IMAGE_EXPORT_DIRECTORY*)((ULONG_PTR)Hooks_Informastion::hNtDll + pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
 
-					size_t fSize = sizeof(void*) * pExports->NumberOfNames;
-					ExportsPage = (void**)std::malloc(fSize);
-					void** exppage = ExportsPage;
-					if (ExportsPage)
-					{
-						ExportsPageDbg = (void**)std::malloc(fSize);
-						void** exppagedbg = ExportsPageDbg;
-						if (ExportsPageDbg)
-						{
-							DWORD* NamesAddresses = (DWORD*)((ULONG_PTR)Hooks_Informastion::hNtDll + pExports->AddressOfNames);
-							for (unsigned int i = 0; i < pExports->NumberOfNames; i++, NamesAddresses++) {
-								LPCSTR StrP = (LPCSTR)((ULONG_PTR)Hooks_Informastion::hNtDll + *NamesAddresses);
-								void* ExportsPageT = (void*)GetProcAddress(Hooks_Informastion::hNtDll, StrP);
-								*exppage = ExportsPageT;
-								if (std::memcmp(StrP, "Dbg", std::strlen("Dbg")) == 0) {
-									*exppagedbg = ExportsPageT;
-									exppagedbg++;
-								}
-								exppage++;
-							}
+					ExportsFunctions = (sizeof(void*) * pExports->NumberOfFunctions) + 0x100;
+					ExportsPage = (void**)VirtualAlloc(0, ExportsFunctions, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+					if (!ExportsPage) {
+						VirtualFree(OriginalMappedNtdll, 0, MEM_RELEASE);
+						VirtualFree(Page, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+					std::memset(ExportsPage, ExportsFunctions, 0);
 
-							// Restore here
-							size_t b = 0;
-							void** exp = ExportsPageDbg;
-							while (b < fSize && *exp)
-							{
-								SIZE_T SectionVirtualSize = 0;
-								void* OutSBaseAddress = nullptr;
-								if (IsAddressSection((ULONG_PTR)*exp, (ULONG_PTR)Hooks_Informastion::hNtDll, IMAGE_FIRST_SECTION(pNtHeader), pNtHeader, &OutSBaseAddress, &SectionVirtualSize))
-								{
-									size_t Position = ((ULONG_PTR)*exp - (ULONG_PTR)OutSBaseAddress);
-									size_t i = 0;
-									for (;;)
-									{
-										ULONG_PTR CurrentAddress = (ULONG_PTR)*exp + i;
+					// Store exports pointers
+					size_t DbgFunctionsCount = 0;
+					DWORD* pExpNames = (DWORD*)((ULONG_PTR)Hooks_Informastion::hNtDll + pExports->AddressOfNames);
+					WORD* pOrdinalName = (WORD*)((ULONG_PTR)Hooks_Informastion::hNtDll + pExports->AddressOfNameOrdinals);
+					DWORD* pFunction = (DWORD*)((ULONG_PTR)Hooks_Informastion::hNtDll + pExports->AddressOfFunctions);
 
-										if (Position > SectionVirtualSize) {
-											break;
-										}
-
-										if (i != 0) {
-											if (IsAddressPresent(ExportsPage, (void*)CurrentAddress, fSize)) {
-												break;
-											}
-										}
-
-										size_t offsetRaw = ConvertRvaToOffset(CurrentAddress, (ULONG_PTR)Hooks_Informastion::hNtDll, IMAGE_FIRST_SECTION(pNtHeader), pNtHeader);
-										if (offsetRaw)
-										{
-											DWORD OLD;
-											if (VirtualProtect((void*)CurrentAddress, sizeof(BYTE), PAGE_EXECUTE_READWRITE, &OLD))
-											{
-												std::memcpy((void*)CurrentAddress, (void*)((ULONG_PTR)Page + offsetRaw), sizeof(BYTE));
-												VirtualProtect((void*)CurrentAddress, sizeof(BYTE), OLD, &OLD);
-											}
-										}
-										i++;
-										Position++;
+					for (unsigned int i = 0; i < pExports->NumberOfFunctions; i++) {
+						for (unsigned int b = 0; b < pExports->NumberOfNames; b++) {
+							if (pOrdinalName[b] == i) {
+								auto pFunctionName = (PCHAR)((ULONG_PTR)Hooks_Informastion::hNtDll + pExpNames[b]);
+								if (pFunctionName) {
+									if (std::strncmp(pFunctionName, "Dbg", 3) == 0) {
+										DbgFunctionsCount++;
 									}
 								}
-								b++;
-								exp++;
 							}
+						}
+						ExportsPage[i] = (void*)((ULONG_PTR)Hooks_Informastion::hNtDll + pFunction[i]);
+					}
+ 
+					ExportsPageDbg = (void**)VirtualAlloc(0, (sizeof(void*) * DbgFunctionsCount) + 0x100, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+					if (!ExportsPageDbg) {
+						VirtualFree(OriginalMappedNtdll, 0, MEM_RELEASE);
+						VirtualFree(Page, 0, MEM_RELEASE);
+						VirtualFree(ExportsPage, 0, MEM_RELEASE);
+						CloseHandle(FileP);
+						return;
+					}
+					std::memset(ExportsPageDbg, (sizeof(void*) * DbgFunctionsCount) + 0x100, 0);
 
-							// free everything 
-							std::free(Page);
-							std::free(ExportsPage);
-							std::free(ExportsPageDbg);
-						}
-						else {
-							std::free(Page);
-							std::free(ExportsPage);
+					// Now store target functions that we must restore
+					void** ExportsPageDbgFLoop = ExportsPageDbg;
+					for (unsigned int i = 0; i < pExports->NumberOfNames; i++) {
+						auto pFunctionName = (PCHAR)((ULONG_PTR)Hooks_Informastion::hNtDll + pExpNames[i]);
+						if (pFunctionName) {
+							if (std::strncmp(pFunctionName, "Dbg", 3) == 0) {
+								*ExportsPageDbgFLoop = GetProcAddress(Hooks_Informastion::hNtDll, pFunctionName);
+								ExportsPageDbgFLoop++;
+							}
 						}
 					}
-					else {
-						std::free(Page);
+
+					// Restore
+					for (size_t i = 0; i < DbgFunctionsCount; i++) {
+						for (size_t m = 0; m < 0x100; m++) {
+							PBYTE TargetRestoreAddr = (PBYTE)((ULONG_PTR)ExportsPageDbg[i] + m);
+							DWORD CurrRVa;
+							PBYTE pOrgByte;
+							DWORD OLD;
+							bool Break = false;
+							if (m != 0) {
+								// If we reach another export function then break.
+								for (unsigned int x = 0; x < pExports->NumberOfFunctions; x++) {
+									if (ExportsPage[x] == (void*)TargetRestoreAddr) {
+										Break = true;
+										break;
+									}
+								}
+							}
+							if (Break) {
+								break;
+							}
+							CurrRVa = (DWORD)((ULONG_PTR)TargetRestoreAddr - (ULONG_PTR)Hooks_Informastion::hNtDll);
+							pOrgByte = (PBYTE)((ULONG_PTR)OriginalMappedNtdll + CurrRVa);
+							if (VirtualProtect(TargetRestoreAddr, sizeof(BYTE), PAGE_EXECUTE_READWRITE, &OLD)) {
+								*TargetRestoreAddr = *pOrgByte;
+								VirtualProtect(TargetRestoreAddr, sizeof(BYTE), OLD, &OLD);
+							}
+						}
 					}
+
+					// Free
+					VirtualFree(OriginalMappedNtdll, 0, MEM_RELEASE);
+					VirtualFree(Page, 0, MEM_RELEASE);
+					VirtualFree(ExportsPage, 0, MEM_RELEASE);
+					VirtualFree(ExportsPageDbg, 0, MEM_RELEASE);
 				}
-				std::fclose(FileP);
+				CloseHandle(FileP);
 			}
 		}
 	}
@@ -700,6 +778,52 @@ namespace Hooks
 			}
 		}
 	}
+	static void HideGetTickCount()
+	{
+		Hooks_Informastion::Kernel32_GetTickCountP = GetProcAddress(Hooks_Informastion::hKernel32, "GetTickCount");
+
+		if (Hooks_Config::Kernel32_GetTickCount)
+		{
+			if (Hooks_Informastion::Kernel32_GetTickCountP)
+			{
+				// Hook
+				Hook_Info HookDataS;
+				int32_t ErrorCode = NULL;
+
+				Hooks_Informastion::Kernel32_GetTickCountID = ColdHook_Service::InitFunctionHookByAddress(&HookDataS, false,
+					Hooks_Informastion::Kernel32_GetTickCountP, Hook_emu::__GetTickCount, &ErrorCode);
+
+				if (Hooks_Informastion::Kernel32_GetTickCountID > NULL && ErrorCode == NULL)
+				{
+					ColdHook_Service::ServiceRegisterHookInformation(&HookDataS, Hooks_Informastion::Kernel32_GetTickCountID, &ErrorCode);
+					Hooks_Informastion::Kernel32_GetTickCountP = HookDataS.OriginalF;
+				}
+			}
+		}
+	}
+	static void HideGetTickCount64()
+	{
+		Hooks_Informastion::Kernel32_GetTickCount64P = GetProcAddress(Hooks_Informastion::hKernel32, "GetTickCount64");
+
+		if (Hooks_Config::Kernel32_GetTickCount64)
+		{
+			if (Hooks_Informastion::Kernel32_GetTickCount64P)
+			{
+				// Hook
+				Hook_Info HookDataS;
+				int32_t ErrorCode = NULL;
+
+				Hooks_Informastion::Kernel32_GetTickCount64ID = ColdHook_Service::InitFunctionHookByAddress(&HookDataS, false,
+					Hooks_Informastion::Kernel32_GetTickCount64P, Hook_emu::__GetTickCount64, &ErrorCode);
+
+				if (Hooks_Informastion::Kernel32_GetTickCount64ID > NULL&& ErrorCode == NULL)
+				{
+					ColdHook_Service::ServiceRegisterHookInformation(&HookDataS, Hooks_Informastion::Kernel32_GetTickCount64ID, &ErrorCode);
+					Hooks_Informastion::Kernel32_GetTickCount64P = HookDataS.OriginalF;
+				}
+			}
+		}
+	}
 }
 namespace Hooks_Manager
 {
@@ -727,6 +851,8 @@ namespace Hooks_Manager
 				Hooks_Manager::GetExplorerPID();
 
 				// Call hooking functions
+				Hooks::HideAntiAntiAttach();
+
 				Hooks::HideProcessInformations();
 				Hooks::HideCloseHandle();
 				Hooks::HideDRx();
@@ -740,14 +866,12 @@ namespace Hooks_Manager
 				Hooks::HideExceptionDispatcher();
 				Hooks::HideYieldExecution();
 				Hooks::HideSetDebugFilterState();
-
 				Hooks::HideProcess32First();
 				Hooks::HideProcess32Next();
-
-				Hooks::HideAntiAntiAttach();
+				Hooks::HideGetTickCount64();
+				Hooks::HideGetTickCount();
 
 				Hook_emu::InitHookFunctionsVars();
-
 				IsInitted = true;
 			}
 		}
@@ -810,6 +934,8 @@ namespace Hooks_Manager
 
 		Hooks_Config::Kernel32_Process32First = GetPrivateProfileIntA("WinAPIs", "Process32First", true, INI) != FALSE;
 		Hooks_Config::Kernel32_Process32Next = GetPrivateProfileIntA("WinAPIs", "Process32Next", true, INI) != FALSE;
+		Hooks_Config::Kernel32_GetTickCount = GetPrivateProfileIntA("WinAPIs", "GetTickCount", true, INI) != FALSE;
+		Hooks_Config::Kernel32_GetTickCount64 = GetPrivateProfileIntA("WinAPIs", "GetTickCount64", true, INI) != FALSE;
 	}
 	static std::multimap<DWORD, size_t> ThreadDataID;
 	static size_t CurrentThreadDataIDP = 0;

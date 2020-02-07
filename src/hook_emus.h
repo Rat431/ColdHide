@@ -9,28 +9,20 @@
 #include <tlhelp32.h>
 
 // Define original functions
-typedef NTSTATUS(NTAPI* __NtQueryInformationProcess__)(IN HANDLE, IN PROCESSINFOCLASS, OUT PVOID, IN ULONG, OUT PULONG);
-typedef NTSTATUS(NTAPI* __NtSetInformationThread__)(IN HANDLE, IN THREADINFOCLASS, IN PVOID, IN ULONG);
-typedef NTSTATUS(NTAPI* __NtQuerySystemInformation__)(IN SYSTEM_INFORMATION_CLASS, OUT PVOID, IN ULONG, OUT PULONG);
-typedef NTSTATUS(NTAPI* __NtClose__)(IN HANDLE);
-typedef NTSTATUS(NTAPI* __NtQueryObject__)(IN HANDLE, IN OBJECT_INFORMATION_CLASS, OUT PVOID, IN ULONG, OUT PULONG);
-typedef NTSTATUS(NTAPI* __NtGetContextThread__)(IN HANDLE, OUT PCONTEXT);
-typedef NTSTATUS(NTAPI* __NtSetContextThread__)(IN HANDLE, IN PCONTEXT);
-typedef NTSTATUS(NTAPI* __NtContinue__)(IN PCONTEXT, IN BOOLEAN);
-typedef NTSTATUS(NTAPI* __NtCreateThreadEx__)(OUT PHANDLE, IN ACCESS_MASK, IN OUT POBJECT_ATTRIBUTES, IN HANDLE,
-	IN PVOID,
-	IN OUT PVOID,
-	IN ULONG,
-	IN OUT ULONG_PTR,
-	IN OUT SIZE_T,
-	IN OUT SIZE_T,
-	IN OUT PPS_ATTRIBUTE_LIST
-);
-typedef NTSTATUS(NTAPI* __NtSetInformationProcess__)(IN HANDLE, IN PROCESS_INFORMATION_CLASS, IN PVOID, IN ULONG);
+typedef NTSTATUS(NTAPI* __NtQueryInformationProcess__)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+typedef NTSTATUS(NTAPI* __NtSetInformationThread__)(HANDLE, THREADINFOCLASS, PVOID, ULONG);
+typedef NTSTATUS(NTAPI* __NtQuerySystemInformation__)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+typedef NTSTATUS(NTAPI* __NtClose__)(HANDLE);
+typedef NTSTATUS(NTAPI* __NtQueryObject__)(HANDLE, OBJECT_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+typedef NTSTATUS(NTAPI* __NtGetContextThread__)(HANDLE, PCONTEXT);
+typedef NTSTATUS(NTAPI* __NtSetContextThread__)(HANDLE, PCONTEXT);
+typedef NTSTATUS(NTAPI* __NtContinue__)(PCONTEXT, BOOLEAN);
+typedef NTSTATUS(NTAPI* __NtCreateThreadEx__)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, PVOID, PVOID, ULONG, ULONG_PTR, SIZE_T, SIZE_T, PPS_ATTRIBUTE_LIST);
+typedef NTSTATUS(NTAPI* __NtSetInformationProcess__)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
 typedef NTSTATUS(NTAPI* __NtYieldExecution__)();
-typedef NTSTATUS(NTAPI* __NtSetDebugFilterState__)(IN ULONG, IN ULONG, IN BOOLEAN);
-typedef VOID(NTAPI* __KiUserExceptionDispatcher__)(IN PEXCEPTION_RECORD, IN PCONTEXT);
+typedef NTSTATUS(NTAPI* __NtSetDebugFilterState__)(ULONG, ULONG, BOOLEAN);
 
+typedef VOID(NTAPI* __KiUserExceptionDispatcher__)(PEXCEPTION_RECORD, PCONTEXT);
 typedef BOOL(WINAPI* __Process32First__)(HANDLE, LPPROCESSENTRY32);
 typedef BOOL(WINAPI* __Process32Next__)(HANDLE, LPPROCESSENTRY32);
 
@@ -38,89 +30,29 @@ namespace Hook_emu
 {
 	void InitHookFunctionsVars();
 
-	extern "C"
-	{
-		_declspec(dllexport) NTSTATUS NTAPI __NtQueryInformationProcess(IN HANDLE ProcessHandle, IN PROCESSINFOCLASS ProcessInformationClass,
-			OUT PVOID ProcessInformation,
-			IN ULONG  ProcessInformationLength,
-			OUT PULONG ReturnLength);
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetInformationThread(
-			IN HANDLE          ThreadHandle,
-			IN THREADINFOCLASS ThreadInformationClass,
-			IN PVOID           ThreadInformation,
-			IN ULONG           ThreadInformationLength
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtQuerySystemInformation(
-			IN SYSTEM_INFORMATION_CLASS SystemInformationClass,
-			OUT PVOID                   SystemInformation,
-			IN ULONG                    SystemInformationLength,
-			OUT PULONG                  ReturnLength
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtClose(
-			IN HANDLE Handle
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtQueryObject(
-			IN HANDLE                   Handle,
-			IN OBJECT_INFORMATION_CLASS ObjectInformationClass,
-			OUT PVOID                    ObjectInformation,
-			IN ULONG                    ObjectInformationLength,
-			OUT PULONG                   ReturnLength
-		);
+	// proxied functions 
+	NTSTATUS NTAPI __NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass, PVOID ProcessInformation, ULONG  ProcessInformationLength, PULONG ReturnLength);
+	NTSTATUS NTAPI __NtSetInformationThread(HANDLE ThreadHandle, THREADINFOCLASS ThreadInformationClass, PVOID ThreadInformation, ULONG ThreadInformationLength);
+	NTSTATUS NTAPI __NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength);
+	NTSTATUS NTAPI __NtClose(HANDLE Handle);
+	NTSTATUS NTAPI __NtQueryObject(HANDLE Handle, OBJECT_INFORMATION_CLASS ObjectInformationClass, PVOID ObjectInformation, ULONG ObjectInformationLength, PULONG ReturnLength);
 
-		// DRx functions
-		_declspec(dllexport) NTSTATUS NTAPI __NtGetContextThread(
-			IN HANDLE               ThreadHandle,
-			OUT PCONTEXT            pContext
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetContextThread(
-			IN HANDLE               ThreadHandle,
-			IN PCONTEXT            pContext
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtContinue(
-			IN PCONTEXT ThreadContext, 
-			IN BOOLEAN RaiseAlert
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtCreateThreadEx(
-			_Out_ PHANDLE ThreadHandle,
-			_In_ ACCESS_MASK DesiredAccess,
-			_In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
-			_In_ HANDLE ProcessHandle,
-			_In_ PVOID StartRoutine,
-			_In_opt_ PVOID Argument,
-			_In_ ULONG CreateFlags,
-			_In_opt_ ULONG_PTR ZeroBits,
-			_In_opt_ SIZE_T StackSize,
-			_In_opt_ SIZE_T MaximumStackSize,
-			_In_opt_ PPS_ATTRIBUTE_LIST AttributeList
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetInformationProcess(
-			IN HANDLE ProcessHandle,
-			IN PROCESS_INFORMATION_CLASS ProcessInformationClass,
-			IN PVOID ProcessInformation,
-			IN ULONG ProcessInformationLength
-		);
-		_declspec(dllexport) VOID NTAPI __KiUserExceptionDispatcher(
-			IN PEXCEPTION_RECORD ExceptionRecord,
-			IN PCONTEXT Context
-		);
-		VOID NTAPI __RKiUserExceptionDispatcher(
-			IN PEXCEPTION_RECORD ExceptionRecord,
-			IN PCONTEXT Context
-		);
-		_declspec(dllexport) NTSTATUS NTAPI __NtYieldExecution();
-		_declspec(dllexport) NTSTATUS NTAPI __NtSetDebugFilterState(
-			IN ULONG ComponentId,
-			IN ULONG Level,
-			IN BOOLEAN State
-		);
+	// DRx functions
+	NTSTATUS NTAPI __NtGetContextThread(HANDLE ThreadHandle, PCONTEXT pContext);
+	NTSTATUS NTAPI __NtSetContextThread(HANDLE ThreadHandle, PCONTEXT pContext);
 
-		_declspec(dllexport) BOOL WINAPI __Process32FirstW(
-			HANDLE hSnapshot, 
-			LPPROCESSENTRY32 lppe
-		);
-		_declspec(dllexport) BOOL WINAPI __Process32NextW(
-			HANDLE hSnapshot,
-			LPPROCESSENTRY32 lppe
-		);
-	}
+	NTSTATUS NTAPI __NtContinue(PCONTEXT ThreadContext, BOOLEAN RaiseAlert);
+	NTSTATUS NTAPI __NtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, ULONG_PTR ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PPS_ATTRIBUTE_LIST AttributeList);
+	NTSTATUS NTAPI __NtSetInformationProcess(HANDLE ProcessHandle, PROCESS_INFORMATION_CLASS ProcessInformationClass, PVOID ProcessInformation, ULONG ProcessInformationLength);
+	NTSTATUS NTAPI __NtYieldExecution();
+	NTSTATUS NTAPI __NtSetDebugFilterState(ULONG ComponentId, ULONG Level, BOOLEAN State);
+
+	VOID NTAPI __KiUserExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context);
+	VOID NTAPI __RKiUserExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context);
+	
+
+	BOOL WINAPI __Process32FirstW(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
+	BOOL WINAPI __Process32NextW(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
+	DWORD WINAPI __GetTickCount();
+	ULONGLONG WINAPI __GetTickCount64();
 }

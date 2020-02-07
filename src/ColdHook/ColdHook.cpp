@@ -197,7 +197,7 @@ namespace ColdHook_Service
 					for (;;)
 					{
 						// We give a range of 40MB
-						if (Distance > 0x41943040) {
+						if (Distance > 40000000) {
 							if (IsBack) {
 								if (OutErrorCode > NULL) {
 									*OutErrorCode = FALIED_OUT_RANGE;

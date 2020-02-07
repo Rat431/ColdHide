@@ -68,6 +68,12 @@ namespace Hooks_Informastion
 
 	extern void* Kernel32_Process32NextWP;
 	extern int32_t Kernel32_Process32NextWID;
+
+	extern void* Kernel32_GetTickCountP;
+	extern int32_t Kernel32_GetTickCountID;
+
+	extern void* Kernel32_GetTickCount64P;
+	extern int32_t Kernel32_GetTickCount64ID;
 }
 namespace Hooks_Config
 {
@@ -104,6 +110,8 @@ namespace Hooks_Config
 
 	extern bool Kernel32_Process32First;
 	extern bool Kernel32_Process32Next;
+	extern bool Kernel32_GetTickCount;
+	extern bool Kernel32_GetTickCount64;
 }
 namespace Hooks
 {
@@ -124,6 +132,8 @@ namespace Hooks
 
 	static void HideProcess32First();
 	static void HideProcess32Next();
+	static void HideGetTickCount();
+	static void HideGetTickCount64();
 }
 namespace Hooks_Manager
 {
