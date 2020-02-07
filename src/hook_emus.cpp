@@ -15,23 +15,6 @@ static CONTEXT FakeContext[0x90000] = { 0 };
 static CONTEXT BeckupHardwareBP[0x90000] = { 0 };
 static bool KIUEDFlag[0x90000] = { 0 };
 
-// Org pointers
-__NtQueryInformationProcess__ ___NtQueryInformationProcess__;
-__NtSetInformationThread__ ___NtSetInformationThread__;
-__NtQuerySystemInformation__ ___NtQuerySystemInformation__;
-__NtClose__ ___NtClose__;
-__NtQueryObject__ ___NtQueryObject__;
-__NtGetContextThread__ ___NtGetContextThread__;
-__NtSetContextThread__ ___NtSetContextThread__;
-__NtContinue__ ___NtContinue__;
-__NtCreateThreadEx__ ___NtCreateThreadEx__;
-__NtSetInformationProcess__ ___NtSetInformationProcess__;
-__NtYieldExecution__ ___NtYieldExecution__;
-__NtSetDebugFilterState__ ___NtSetDebugFilterState__;
-__KiUserExceptionDispatcher__ ___KiUserExceptionDispatcher__;
-__Process32First__ ___Process32First__;
-__Process32Next__ ___Process32Next__;
-
 namespace Hook_emu
 {
 	static bool Cleaned = false;
@@ -46,22 +29,6 @@ namespace Hook_emu
 			}
 			Cleaned = true;
 		}
-
-		___NtQueryInformationProcess__ = (__NtQueryInformationProcess__)Hooks_Informastion::Nt_QueryProcessP;
-		___NtSetInformationThread__ = (__NtSetInformationThread__)Hooks_Informastion::Nt_SetThreadInformationP;
-		___NtQuerySystemInformation__ = (__NtQuerySystemInformation__)Hooks_Informastion::Nt_QuerySystemP;
-		___NtClose__ = (__NtClose__)Hooks_Informastion::Nt_CloseP;
-		___NtQueryObject__ = (__NtQueryObject__)Hooks_Informastion::Nt_QueryObjectP;
-		___NtGetContextThread__ = (__NtGetContextThread__)Hooks_Informastion::Nt_NtGetContextThreadP;
-		___NtSetContextThread__ = (__NtSetContextThread__)Hooks_Informastion::Nt_NtSetContextThreadP;
-		___NtContinue__ = (__NtContinue__)Hooks_Informastion::Nt_ContinueP;
-		___NtCreateThreadEx__ = (__NtCreateThreadEx__)Hooks_Informastion::Nt_CreateThreadExP;
-		___NtSetInformationProcess__ = (__NtSetInformationProcess__)Hooks_Informastion::Nt_SetInformationProcessP;
-		___NtYieldExecution__ = (__NtYieldExecution__)nullptr;
-		___NtSetDebugFilterState__ = (__NtSetDebugFilterState__)nullptr;
-		___KiUserExceptionDispatcher__ = (__KiUserExceptionDispatcher__)nullptr;
-		___Process32First__ = (__Process32First__)Hooks_Informastion::Kernel32_Process32FirstWP;
-		___Process32Next__ = (__Process32Next__)Hooks_Informastion::Kernel32_Process32NextWP;
 	}
 	
 	// proxied functions 
@@ -70,6 +37,7 @@ namespace Hook_emu
 		NTSTATUS Return = STATUS_SUCCESS;
 
 		// Call the restored function 
+		__NtQueryInformationProcess__ ___NtQueryInformationProcess__ = (__NtQueryInformationProcess__)Hooks_Informastion::Nt_QueryProcessP;
 		Return = ___NtQueryInformationProcess__(ProcessHandle, ProcessInformationClass, ProcessInformation, ProcessInformationLength, ReturnLength);
 
 		if (NT_SUCCESS(Return))
@@ -130,6 +98,7 @@ namespace Hook_emu
 	NTSTATUS NTAPI __NtSetInformationThread(HANDLE ThreadHandle, THREADINFOCLASS ThreadInformationClass, PVOID ThreadInformation, ULONG ThreadInformationLength)
 	{
 		// Ignore the call with ThreadHideFromDebugger flag
+		__NtSetInformationThread__ ___NtSetInformationThread__ = (__NtSetInformationThread__)Hooks_Informastion::Nt_SetThreadInformationP;
 		if (ThreadInformationClass == 0x11 && ThreadInformation <= NULL && ThreadInformationLength <= NULL)
 		{
 			return STATUS_SUCCESS;
@@ -140,6 +109,7 @@ namespace Hook_emu
 	{
 		NTSTATUS Return = STATUS_SUCCESS;
 
+		__NtQuerySystemInformation__ ___NtQuerySystemInformation__ = (__NtQuerySystemInformation__)Hooks_Informastion::Nt_QuerySystemP;
 		Return = ___NtQuerySystemInformation__(SystemInformationClass, SystemInformation, SystemInformationLength, ReturnLength);
 
 		if (NT_SUCCESS(Return))
@@ -163,6 +133,9 @@ namespace Hook_emu
 		BYTE BUFF[2] = { 0 };
 		NTSTATUS Return = STATUS_SUCCESS;
 
+		__NtClose__ ___NtClose__ = (__NtClose__)Hooks_Informastion::Nt_CloseP;
+		__NtQueryObject__ ___NtQueryObject__ = (__NtQueryObject__)Hooks_Informastion::Nt_QueryObjectP;
+
 		// Check if the handle is valid
 		if ((Return = ___NtQueryObject__(Handle, (OBJECT_INFORMATION_CLASS)0x4, BUFF, 0x2, NULL)) != STATUS_INVALID_HANDLE) {
 			return ___NtClose__(Handle);
@@ -172,6 +145,7 @@ namespace Hook_emu
 	NTSTATUS NTAPI __NtQueryObject(HANDLE Handle, OBJECT_INFORMATION_CLASS ObjectInformationClass, PVOID ObjectInformation, ULONG ObjectInformationLength, PULONG ReturnLength)
 	{
 		NTSTATUS Return = STATUS_SUCCESS;
+		__NtQueryObject__ ___NtQueryObject__ = (__NtQueryObject__)Hooks_Informastion::Nt_QueryObjectP;
 		Return = ___NtQueryObject__(Handle, ObjectInformationClass, ObjectInformation, ObjectInformationLength, ReturnLength);
 
 		if (NT_SUCCESS(Return))
@@ -204,6 +178,7 @@ namespace Hook_emu
 	NTSTATUS NTAPI __NtGetContextThread(HANDLE ThreadHandle, PCONTEXT pContext)
 	{
 		NTSTATUS Return = STATUS_SUCCESS;
+		__NtGetContextThread__ ___NtGetContextThread__ = (__NtGetContextThread__)Hooks_Informastion::Nt_NtGetContextThreadP;
 
 		if (pContext) {
 			if (pContext->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
@@ -247,6 +222,7 @@ namespace Hook_emu
 	NTSTATUS NTAPI __NtSetContextThread(HANDLE ThreadHandle, PCONTEXT pContext)
 	{
 		NTSTATUS Return = STATUS_SUCCESS;
+		__NtSetContextThread__ ___NtSetContextThread__ = (__NtSetContextThread__)Hooks_Informastion::Nt_NtSetContextThreadP;
 
 		if (pContext) {
 			if (pContext->ContextFlags & CONTEXT_DEBUG_REGISTERS) {
@@ -282,6 +258,8 @@ namespace Hook_emu
 
 	NTSTATUS NTAPI __NtContinue(PCONTEXT ThreadContext, BOOLEAN RaiseAlert)
 	{
+		__NtContinue__ ___NtContinue__ = (__NtContinue__)Hooks_Informastion::Nt_ContinueP;
+
 		if (ThreadContext) {
 			size_t CurrOffset = Hooks_Manager::GetOffsetByThreadID(GetCurrentThreadId());
 
@@ -301,6 +279,7 @@ namespace Hook_emu
 	}
 	NTSTATUS NTAPI __NtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, ULONG_PTR ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PPS_ATTRIBUTE_LIST AttributeList)
 	{
+		__NtCreateThreadEx__ ___NtCreateThreadEx__ = (__NtCreateThreadEx__)Hooks_Informastion::Nt_CreateThreadExP;
 		ULONG Flags = CreateFlags;
 		if (Flags & THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER) {
 			Flags &= ~THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER;
@@ -309,6 +288,7 @@ namespace Hook_emu
 	}
 	NTSTATUS NTAPI __NtSetInformationProcess(HANDLE ProcessHandle, PROCESS_INFORMATION_CLASS ProcessInformationClass, PVOID ProcessInformation, ULONG ProcessInformationLength)
 	{
+		__NtSetInformationProcess__ ___NtSetInformationProcess__ = (__NtSetInformationProcess__)Hooks_Informastion::Nt_SetInformationProcessP;
 		if (ProcessInformationClass == 32)
 		{
 			IsEnabledTracing = true;
@@ -377,6 +357,7 @@ namespace Hook_emu
 	BOOL WINAPI __Process32FirstW(HANDLE hSnapshot, LPPROCESSENTRY32 lppe)
 	{
 		BOOL Return;
+		__Process32First__ ___Process32First__ = (__Process32First__)Hooks_Informastion::Kernel32_Process32FirstWP;
 		Return = ___Process32First__(hSnapshot, lppe);
 
 		// Here we patch again the parent PID
@@ -391,6 +372,7 @@ namespace Hook_emu
 	BOOL WINAPI __Process32NextW(HANDLE hSnapshot, LPPROCESSENTRY32 lppe)
 	{
 		BOOL Return;
+		__Process32Next__ ___Process32Next__ = (__Process32Next__)Hooks_Informastion::Kernel32_Process32NextWP;
 		Return = ___Process32Next__(hSnapshot, lppe);
 
 		// Here we patch again the parent PID
