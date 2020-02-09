@@ -1,6 +1,6 @@
 # ColdHide
 
-ColdHook is a mini and simple open source user mode anti-anti debug library x86/x64 for Windows.
+ColdHide is a mini and simple open source user mode anti-anti debug library x86/x64 for Windows.
 To inject this library try using [ColdMDLoader](https://github.com/Rat431/ColdMDLoader).
 
 ## Hooks
